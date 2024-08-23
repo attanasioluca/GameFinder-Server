@@ -35,7 +35,7 @@ const gameSchema = new mongoose.Schema({
     added: { type: Number },
     genre: {
         slug: { type: String, required: true },
-    }
+    },
 });
 const genreSchema = new mongoose.Schema({
     id: { type: String, required: true },
@@ -44,20 +44,27 @@ const genreSchema = new mongoose.Schema({
     background_image: { type: String },
 });
 
+const userSchema = new mongoose.Schema({
+    id: { type: String, required: true },
+    username: { type: String, required: true },
+    member_since: { type: Date, required: true },
+    user_type: {
+        type: String,
+        enum: ["standard", "premium", "moderator"],
+        required: true,
+    },
+    friends: [{ type: String }],
+    wishlist: [{ type: String }],
+    games: [{ type: String }],
+});
+
 const Game = mongoose.model("Game", gameSchema);
 const Platform = mongoose.model("Platform", platformSchema);
 const Genre = mongoose.model("Genre", genreSchema);
+const User = mongoose.model("User", userSchema);
 // Route to fetch games with query parameters
 app.get("/games", async (req, res) => {
-    const {
-        pageNum = 1,
-        platform,
-        genre,
-        sortOrder,
-        searchText,
-    } = req.query;
-
-    console.log("Received query params:", req.query);
+    const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
 
     const filter = {};
     if (genre) {
@@ -73,7 +80,8 @@ app.get("/games", async (req, res) => {
     const sort = {};
     if (sortOrder) {
         const [key, order] = sortOrder.split(":");
-        sort[key] = (sortOrder == "metacritic" || sortOrder == "rating_top")?-1:1;
+        sort[key] =
+            sortOrder == "metacritic" || sortOrder == "rating_top" ? -1 : 1;
     }
 
     const pageSize = 16;
@@ -120,6 +128,18 @@ app.get("/genres", async (req, res) => {
         console.error("Error fetching genres:", error);
         res.status(500).send(error.message);
     }
+});
+
+app.get("/users/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const result = await User.findOne({ id: userId });
+        res.json(result);
+    } catch (error) {
+        console.error("Error fetching user from id:", error);
+        res.status(500).send(error.message);
+    }
+    console.log(res);
 });
 
 app.listen(port, () => {
