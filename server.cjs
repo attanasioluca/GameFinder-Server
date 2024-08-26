@@ -63,6 +63,18 @@ const Platform = mongoose.model("Platform", platformSchema);
 const Genre = mongoose.model("Genre", genreSchema);
 const User = mongoose.model("User", userSchema);
 // Route to fetch games with query parameters
+
+app.get("/gamesById", async (req, res) => {
+    const ids = req.query.ids;
+    const filter = { id: { $in: ids } };
+    try {
+        const games = await Game.find(filter);
+        res.json(games);
+    } catch (error) {
+        console.error("Error fetching games by ids:", error);
+        res.status(500).send(error.message);
+    }
+});
 app.get("/games", async (req, res) => {
     const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
 
@@ -139,7 +151,6 @@ app.get("/users/:userId", async (req, res) => {
         console.error("Error fetching user from id:", error);
         res.status(500).send(error.message);
     }
-    console.log(res);
 });
 
 app.listen(port, () => {
