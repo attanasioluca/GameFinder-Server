@@ -10,7 +10,7 @@ const port = 3000;
 // Esempio di verifica delle credenziali
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-
+import { jwt_secret } from "../../../../../luca/Documents/secret" // utilizzabile solo dal mio computer (Luca)
 app.use(
     session({
         resave: false,
