@@ -2,20 +2,22 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const passport = require("passport");
-const session = require('express-session');
+const session = require("express-session");
 require("./auth");
-const jwt_secret = "decesare"
+const jwt_secret = "decesare";
 const app = express();
 const port = 3000;
 // Esempio di verifica delle credenziali
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-app.use(session({
-    resave : false,
-    saveUninitialized : true, 
-    secret : "cats" 
-}));
+app.use(
+    session({
+        resave: false,
+        saveUninitialized: true,
+        secret: "cats",
+    })
+);
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(cors());
@@ -75,18 +77,18 @@ const loginSchema = new mongoose.Schema({
     email: { type: String, required: true },
     username: { type: String, required: true },
     password: { type: String, required: true },
-    token: { type: String }
-}) 
+    token: { type: String },
+});
 
-const Login = mongoose.model("Login", loginSchema)
-const Review = mongoose.model("Review", reviewSchema)
+const Login = mongoose.model("Login", loginSchema);
+const Review = mongoose.model("Review", reviewSchema);
 const Game = mongoose.model("Game", gameSchema);
 const Platform = mongoose.model("Platform", platformSchema);
 const Genre = mongoose.model("Genre", genreSchema);
 const User = mongoose.model("User", userSchema);
 var LoggedUser = null;
 
-function isLogged (req, res, next){
+function isLogged(req, res, next) {
     req.user ? next() : res.sendStatus(401);
 }
 
@@ -94,18 +96,23 @@ function isLogged (req, res, next){
 app.get("/", (req, res) => {
     res.send("<a href='/auth/google'> accedi con google </a>");
 });
-app.get("/auth/google", passport.authenticate('google', {scope : ["email", "profile"]}), (req, res) =>{
-    //res = token se autenticato 
-});
-app.get("/google/callback",
+app.get(
+    "/auth/google",
+    passport.authenticate("google", { scope: ["email", "profile"] }),
+    (req, res) => {
+        //res = token se autenticato
+    }
+);
+app.get(
+    "/google/callback",
     passport.authenticate("google", {
-        successRedirect : "/protected",
-        failureRedirect : "/failure"
+        successRedirect: "/protected",
+        failureRedirect: "/failure",
     })
 );
-app.get("/failure", (req,res) => {
+app.get("/failure", (req, res) => {
     res.send("errore...");
-});       
+});
 app.get("/protected", isLogged, (req, res) => {
     //query su login con email
     // crea token
@@ -122,8 +129,7 @@ app.get("/users/:usermail", isLogged, async (req, res) => {
         if (result) {
             LoggedUser = result;
             res.json(result);
-        }
-        else {
+        } else {
             res.sendStatus(404);
             LoggedUser = null;
         }
@@ -213,6 +219,23 @@ app.get("/users/:userId", async (req, res) => {
         res.json(result);
     } catch (error) {
         console.error("Error fetching user from id:", error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/users/token/:userToken", async (req, res) => {
+    const { userToken } = req.params;
+    try {
+        const log = await Login.findOne({ token: userToken });
+        if (!log) {
+            return res.status(400).json({ message: "Login not found" });
+        }
+        const result = await User.findOne({ username: log.username });
+        if (!result) {
+            return res.status(400).json({ message: "User not found" });
+        }
+        res.json(result);
+    } catch (error) {
+        console.error("Error fetching user from token:", error);
         res.status(500).send(error.message);
     }
 });
@@ -385,34 +408,83 @@ app.post("/deleteReview", async (req, res) => {
         res.status(500).json({ error: "Server error" });
     }
 });
+app.post("/signup", async (req, res) => {
+    const { email, username, password, user_type } = req.body;
+    // Check username e email
+    if (User.findOne({ username: username })) {
+        return res.status(404).json({ error: "username already in use" });
+    }
+    if (User.findOne({ email: email })) {
+        return res.status(404).json({ error: "email already in use" });
+    }
 
-app.post('/login', async (req, res) => {
+    const userId = User.countDocuments() + 1;
+    const newUser = new User({
+        id: userId,
+        username: username,
+        member_since: new Date(),
+        user_type: user_type,
+        friends: [],
+        wishlist: [],
+        games: [],
+    });
+    async function hashPassword(password) {
+        const saltRounds = 10;
+        try {
+            const hashedPassword = await bcrypt.hash(password, saltRounds);
+            return hashedPassword;
+        } catch (error) {
+            console.error("Error hashing password:", error);
+            throw error;
+        }
+    }
+    hashPassword(password).then((hashedPassword) => {
+        const newLogin = new Login({
+            email: email,
+            username: username,
+            password: hashPassword,
+            token: jwt.sign({ id: username }, jwt_secret, {
+                expiresIn: "168h", // una settimana per token
+            }),
+        });
+    });
+    Login.push(newLogin);
+    User.push(newUser);
+    await Login.save();
+    await User.save();
+    res.json(token);
+    console.log("sent token:", token);
+});
+app.post("/login", async (req, res) => {
     const { email, password } = req.body;
     console.log(req.body);
     try {
-      const user = await Login.findOne({ email: email });
-        
-      if (!user) {
-        return res.status(400).json({ message: 'User not found' });
-      }
-      console.log("email check");
-  
-      const isMatch = await bcrypt.compare(password, user.password);
-  
-      if (!isMatch) {
-        return res.status(400).json({ message: 'Invalid credentials' });
-      }
-  
-      // Genera un token JWT
-      const token = jwt.sign({ id: user._id }, jwtSecret, { expiresIn: '1h' });
-    console.log("sent token:", token);
-      res.json({ token });
-      
+        const login = await Login.findOne({ email: email });
+        if (!login) {
+            return res.status(400).json({ message: "User not found" });
+        }
+
+        const isMatch = await bcrypt.compare(password, login.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid credentials" });
+        }
+        // Genera un token JWT
+        const token = jwt.sign({ id: login._id }, jwt_secret, {
+            expiresIn: "900h",
+        });
+
+        const filter = { email: email };
+        const update = {
+            $set: {
+                token: token,
+            },
+        };
+        await Login.updateOne(filter, update);
+        res.json(token);
     } catch (error) {
-      res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: "Server error" });
     }
 });
-
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
