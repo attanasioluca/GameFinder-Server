@@ -5,7 +5,6 @@ const passport = require("passport");
 const session = require("express-session");
 const app = express();
 const port = 3000;
-// Esempio di verifica delle credenziali
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { jwt_secret } = require("../secret");
