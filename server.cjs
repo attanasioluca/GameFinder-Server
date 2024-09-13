@@ -8,7 +8,7 @@ const port = 3000;
 // Esempio di verifica delle credenziali
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { jwt_secret } = require("../secret");
+const { jwt_secret, sessionSecret } = require("../secret");
 require("./auth");
 // utilizzabile solo dal mio computer (Luca)
 
@@ -16,7 +16,7 @@ app.use(
     session({
         resave: false,
         saveUninitialized: true,
-        secret: "cats",
+        secret: sessionSecret,
     })
 );
 app.use(passport.initialize());
@@ -57,7 +57,6 @@ const gameSchema = new mongoose.Schema({
     released: { type: Date },
     added: { type: Number },
     genre: [{ type: String }],
-    reviews: [reviewSchema],
 });
 const genreSchema = new mongoose.Schema({
     id: { type: String, required: true },
@@ -94,16 +93,13 @@ function isLogged(req, res, next) {
     req.user ? next() : res.sendStatus(401);
 }
 
-// Get function
 app.get("/", (req, res) => {
     res.send("<a href='/auth/google'> accedi con google </a>");
 });
 app.get(
     "/auth/google",
     passport.authenticate("google", { scope: ["email", "profile"] }),
-    (req, res) => {
-        //res = token se autenticato
-    }
+    (req, res) => {}
 );
 app.get(
     "/google/callback",
@@ -115,22 +111,12 @@ app.get(
 app.get("/failure", (req, res) => {
     res.send("errore...");
 });
-app.get("/protected", isLogged, (req, res) => {
-    //query su login con email
-    // crea token
-    // manda token a client
-
-    res.redirect(`/users/${req.user.email}`);
-});
-app.get("/users/:usermail", isLogged, async (req, res) => {
-    const { usermail } = req.params;
-    console.log(usermail);
-
+app.get("/protected", isLogged, async (req, res) => {
     try {
-        const result = await Login.findOne({ email: usermail });
+        const result = await Login.findOne({ email: req.user.email });
         if (result) {
             LoggedUser = result;
-            res.json(result);
+            res.redirect(`http://localhost:5173/?token=${LoggedUser.token}`);
         } else {
             res.sendStatus(404);
             LoggedUser = null;
@@ -152,66 +138,13 @@ app.get("/gamesById", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/games", async (req, res) => {
-    const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
-
-    const filter = {};
-    if (genre) {
-        filter["genre"] = genre;
-    }
-
-    if (platform) {
-        filter["parent_platforms.id"] = platform;
-    }
-    if (searchText) {
-        filter["name"] = { $regex: searchText, $options: "i" }; // Case insensitive search
-    }
-    const sort = {};
-    if (sortOrder) {
-        const [key, order] = sortOrder.split(":");
-        sort[key] =
-            sortOrder == "metacritic" || sortOrder == "rating_top" ? -1 : 1;
-    }
-
-    const pageSize = 16;
-    const skip = (pageNum - 1) * pageSize;
-
-    try {
-        const games = await Game.find(filter)
-            .sort(sort)
-            .skip(skip)
-            .limit(pageSize);
-        res.json(games);
-    } catch (error) {
-        console.error("Error fetching games:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/games/:gameId", async (req, res) => {
+app.get("/reviews/:gameId", async (req, res) => {
     const { gameId } = req.params;
     try {
-        const result = await Game.findOne({ id: gameId });
-        res.json(result);
+        const reviews = await Review.find({ gameId: gameId });
+        res.json(reviews);
     } catch (error) {
-        console.error("Error fetching game from id:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/platforms", async (req, res) => {
-    try {
-        const result = await Platform.find();
-        res.json(result);
-    } catch (error) {
-        console.error("Error fetching platforms:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/genres", async (req, res) => {
-    try {
-        const result = await Genre.find();
-        res.json(result);
-    } catch (error) {
-        console.error("Error fetching genres:", error);
+        console.error("Error fetching reviews:", error);
         res.status(500).send(error.message);
     }
 });
@@ -226,7 +159,6 @@ app.get("/userById/:userId", async (req, res) => {
     }
 });
 app.get("/allUsers/:userId", async (req, res) => {
-    // all but the one with iserId and their friends
     const { userId } = req.params;
     try {
         const user = await User.findOne({ id: userId });
@@ -260,7 +192,6 @@ app.get("/userByToken/:token", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-
 app.get("/userByUsername/:username", async (req, res) => {
     const { username } = req.params;
     try {
@@ -289,14 +220,13 @@ app.get("/gameStatus", async (req, res) => {
     }
     res.json(result);
 });
-// Post functions
+
+
 app.post("/changeGameStatus", async (req, res) => {
     const { userId, gameId, type, add } = req.body;
     console.log(req.body);
     try {
-        // Find the user by userId
         const user = await User.findOne({ id: userId });
-        // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
             return res.status(404).json({ error: "User not found" });
@@ -305,31 +235,29 @@ app.post("/changeGameStatus", async (req, res) => {
             console.log("No game id");
             return res.status(404).json({ error: "Game id doesn't exist" });
         }
-        // Depending on the "type", add the gameId to either "games" or "wishlist"
         if (add) {
             if (type === 1) {
                 if (!user.games.includes(gameId)) {
-                    user.games.push(gameId); // Add gameId to the games array
+                    user.games.push(gameId); 
                 }
             } else if (type === 2) {
                 if (!user.wishlist.includes(gameId)) {
-                    user.wishlist.push(gameId); // Add gameId to the wishlist array
+                    user.wishlist.push(gameId);
                 }
             }
         } else {
             if (type === 1) {
                 if (user.games.includes(gameId)) {
-                    user.games.remove(gameId); // Add gameId to the games array
+                    user.games.remove(gameId);
                 }
             } else if (type === 2) {
                 if (user.wishlist.includes(gameId)) {
-                    user.wishlist.remove(gameId); // Add gameId to the wishlist array
+                    user.wishlist.remove(gameId);
                 }
             }
         }
         await user.save();
 
-        // Send a success response
         res.status(200).json({
             message: `gameId ${gameId} added to ${type} for user ${userId}`,
         });
@@ -341,10 +269,8 @@ app.post("/changeGameStatus", async (req, res) => {
 app.post("/changeFriendStatus", async (req, res) => {
     const { userId, friendId, add } = req.body;
     try {
-        // Find the user by userId
         const user = await User.findOne({ id: userId });
         const friend = await User.findOne({ id: friendId });
-        // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
             return res.status(404).json({ error: "User not found" });
@@ -384,29 +310,15 @@ app.post("/changeFriendStatus", async (req, res) => {
 app.post("/addReview", async (req, res) => {
     const { author, authorName, gameId, comment, rating } = req.body;
     try {
-        // Find the game by gameId
-        const game = await Game.findOne({ id: gameId });
-        if (!game) {
-            return res.status(404).json({ error: "Game not found" });
-        }
-        // Find the user by userId
-        const user = await User.findOne({ id: author });
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
-        // Create a new review/comment
         const newReview = new Review({
-            author: author, // Reference to the user who posted the review
+            author: author, 
             authorName: authorName,
-            gameId: gameId, // Reference to the game being reviewed
-            comment: comment, // The comment text
-            rating: rating, // The rating value
+            gameId: gameId,
+            comment: comment,
+            rating: rating,
         });
         console.log("sending review");
-        // Save the review in the reviews collection
-        game.reviews.push(newReview);
-        await game.save();
+        await newReview.save();
         // Send a success response
         res.status(200).json({ message: "Review added successfully!" });
     } catch (err) {
@@ -417,27 +329,9 @@ app.post("/addReview", async (req, res) => {
 app.post("/deleteReview", async (req, res) => {
     const { author, gameId } = req.body;
     try {
-        // Find the game by gameId
-        const game = await Game.findOne({ id: gameId });
-        if (!game) {
-            return res.status(404).json({ error: "Game not found" });
-        }
-
-        // Find the index of the review by author
-        const reviewIndex = game.reviews.findIndex(
-            (review) => review.author === author
-        );
-        if (reviewIndex === -1) {
-            return res.status(404).json({ error: "Review not found" });
-        }
-
-        // Remove the review from the reviews array
-        game.reviews.splice(reviewIndex, 1);
-
-        // Save the game document after removing the review
-        await game.save();
-
-        // Send a success response
+        console.log(author, gameId);
+        const review = await Review.findOne({ gameId: gameId, author: author });
+        await Review.deleteOne({ _id: review._id });
         res.status(200).json({ message: "Review removed successfully!" });
     } catch (err) {
         console.error("Error removing review:", err);
@@ -448,8 +342,7 @@ app.post("/signup", async (req, res) => {
     const { email, username, password, user_type } = req.body;
 
     console.log("SignUp:", req.body);
-    // Check username e email
-    if ((await User.findOne({ username: username }))) {
+    if (await User.findOne({ username: username })) {
         return res.status(404).json({ error: "username already in use" });
     }
     if (await Login.findOne({ email: email })) {
@@ -457,9 +350,11 @@ app.post("/signup", async (req, res) => {
     }
     console.log("Ok checks");
 
-    const newUserId = await User.countDocuments() + 1;
+    const newUserId = (await User.countDocuments()) + 1;
     const newPassword = await bcrypt.hash(password, saltRounds);
-    const newToken = jwt.sign({ id: username }, jwt_secret, {expiresIn: "168h"})
+    const newToken = jwt.sign({ id: username }, jwt_secret, {
+        expiresIn: "168h",
+    });
 
     const newUser = new User({
         id: newUserId,
@@ -474,11 +369,11 @@ app.post("/signup", async (req, res) => {
         email: email,
         username: username,
         password: newPassword,
-        token: newToken
-    })
+        token: newToken,
+    });
 
     console.log("User Created:", newUser);
-    console.log("Login created", newLogin)
+    console.log("Login created", newLogin);
     await newLogin.save();
     await newUser.save();
     res.json(newToken);
@@ -497,8 +392,6 @@ app.post("/login", async (req, res) => {
         if (!isMatch) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
-        // Genera un token JWT
-        console.log(jwt_secret);
         const token = jwt.sign({ id: email }, jwt_secret, {
             expiresIn: "900h",
         });
@@ -511,6 +404,19 @@ app.post("/login", async (req, res) => {
         };
         await Login.updateOne(filter, update);
         res.json(token);
+    } catch (error) {
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+app.post("/getGoogleToken", async (req, res) => {
+    try {
+        if (LoggedUser) {
+            console.log(LoggedUser.token);
+            res.json(LoggedUser.token);
+        } else {
+            console.log("no logged user");
+        }
     } catch (error) {
         res.status(500).json({ message: "Server error" });
     }
