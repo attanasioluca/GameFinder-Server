@@ -3,14 +3,15 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const passport = require("passport");
 const session = require("express-session");
-require("./auth");
-const jwt_secret = "decesare";
 const app = express();
 const port = 3000;
 // Esempio di verifica delle credenziali
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-import { jwt_secret } from "../../../../../luca/Documents/secret" // utilizzabile solo dal mio computer (Luca)
+const { jwt_secret } = require("../secret");
+require("./auth");
+// utilizzabile solo dal mio computer (Luca)
+
 app.use(
     session({
         resave: false,
@@ -91,7 +92,6 @@ var LoggedUser = null;
 function isLogged(req, res, next) {
     req.user ? next() : res.sendStatus(401);
 }
-
 // Get function
 app.get("/", (req, res) => {
     res.send("<a href='/auth/google'> accedi con google </a>");
@@ -139,7 +139,8 @@ app.get("/users/:usermail", isLogged, async (req, res) => {
     }
 });
 app.get("/gamesById", async (req, res) => {
-    const ids = req.query.ids;
+    const { ids } = req.query;
+    console.log(ids);
     const filter = { id: { $in: ids } };
     try {
         const games = await Game.find(filter);
@@ -148,6 +149,7 @@ app.get("/gamesById", async (req, res) => {
         console.error("Error fetching games by ids:", error);
         res.status(500).send(error.message);
     }
+    
 });
 app.get("/games", async (req, res) => {
     const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
@@ -212,7 +214,7 @@ app.get("/genres", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/users/:userId", async (req, res) => {
+app.get("/userById/:userId", async (req, res) => {
     const { userId } = req.params;
     try {
         const result = await User.findOne({ id: userId });
@@ -222,16 +224,41 @@ app.get("/users/:userId", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/users/token/:userToken", async (req, res) => {
-    const { userToken } = req.params;
+app.get("/allUsers/:userId", async (req, res) => { // all but the one with iserId
+    const { userId } = req.params;
     try {
-        const log = await Login.findOne({ token: userToken });
+        const result = await User.find({ id: { $ne: userId } });
+        res.json(result);
+        console.log(result);
+    } catch (error) {
+        console.error("Error fetching users from id:", error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/userByToken/:token", async (req, res) => {
+    const { token }= req.params;
+    try {
+        const log = await Login.findOne({ token: token });
         if (!log) {
             return res.status(400).json({ message: "Login not found" });
         }
         const result = await User.findOne({ username: log.username });
         if (!result) {
             return res.status(400).json({ message: "User not found" });
+        }
+        res.json(result);
+    } catch (error) {
+        console.error("Error fetching user from token:", error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.get("/userByUsername/:username", async (req, res) => {
+    const { username }= req.params;
+    try {
+        const user = await User.findOne({ username: username });
+        if (!user) {
+            return res.status(400).json({ message: "Login not found" });
         }
         res.json(result);
     } catch (error) {
@@ -310,22 +337,20 @@ app.post("/changeFriendStatus", async (req, res) => {
     try {
         // Find the user by userId
         const user = await User.findOne({ id: userId });
+        const friend = await User.findOne({id: friendId});
         // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
             return res.status(404).json({ error: "User not found" });
         }
-        if (!friendId) {
+        if (!friend) {
             console.log("No friend id");
             return res.status(404).json({ error: "Game id doesn't exist" });
         }
         if (add) {
             if (!user.friends.includes(friendId)) {
                 user.friends.push(friendId);
-            }
-        } else {
-            if (user.friends.includes(friendId)) {
-                user.friends.remove(friendId); // Add gameId to the games array
+                friend.friends.push(userId)
             }
         }
         await user.save();
@@ -469,7 +494,8 @@ app.post("/login", async (req, res) => {
             return res.status(400).json({ message: "Invalid credentials" });
         }
         // Genera un token JWT
-        const token = jwt.sign({ id: login._id }, jwt_secret, {
+        console.log(jwt_secret);
+        const token = jwt.sign({ id: email }, jwt_secret, {
             expiresIn: "900h",
         });
 
