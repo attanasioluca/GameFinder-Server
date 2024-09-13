@@ -88,10 +88,12 @@ const Platform = mongoose.model("Platform", platformSchema);
 const Genre = mongoose.model("Genre", genreSchema);
 const User = mongoose.model("User", userSchema);
 var LoggedUser = null;
+const saltRounds = 10;
 
 function isLogged(req, res, next) {
     req.user ? next() : res.sendStatus(401);
 }
+
 // Get function
 app.get("/", (req, res) => {
     res.send("<a href='/auth/google'> accedi con google </a>");
@@ -149,7 +151,6 @@ app.get("/gamesById", async (req, res) => {
         console.error("Error fetching games by ids:", error);
         res.status(500).send(error.message);
     }
-    
 });
 app.get("/games", async (req, res) => {
     const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
@@ -224,19 +225,26 @@ app.get("/userById/:userId", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/allUsers/:userId", async (req, res) => { // all but the one with iserId
+app.get("/allUsers/:userId", async (req, res) => {
+    // all but the one with iserId and their friends
     const { userId } = req.params;
     try {
-        const result = await User.find({ id: { $ne: userId } });
+        const user = await User.findOne({ id: userId });
+        if (!user) {
+            console.error("Error fetching user from id:", error);
+            res.status(500).send(error.message);
+        }
+        const result = await User.find({
+            id: { $ne: userId, $nin: user.friends },
+        });
         res.json(result);
-        console.log(result);
     } catch (error) {
         console.error("Error fetching users from id:", error);
         res.status(500).send(error.message);
     }
 });
 app.get("/userByToken/:token", async (req, res) => {
-    const { token }= req.params;
+    const { token } = req.params;
     try {
         const log = await Login.findOne({ token: token });
         if (!log) {
@@ -254,7 +262,7 @@ app.get("/userByToken/:token", async (req, res) => {
 });
 
 app.get("/userByUsername/:username", async (req, res) => {
-    const { username }= req.params;
+    const { username } = req.params;
     try {
         const user = await User.findOne({ username: username });
         if (!user) {
@@ -281,7 +289,6 @@ app.get("/gameStatus", async (req, res) => {
     }
     res.json(result);
 });
-
 // Post functions
 app.post("/changeGameStatus", async (req, res) => {
     const { userId, gameId, type, add } = req.body;
@@ -333,11 +340,10 @@ app.post("/changeGameStatus", async (req, res) => {
 });
 app.post("/changeFriendStatus", async (req, res) => {
     const { userId, friendId, add } = req.body;
-    console.log(req.body);
     try {
         // Find the user by userId
         const user = await User.findOne({ id: userId });
-        const friend = await User.findOne({id: friendId});
+        const friend = await User.findOne({ id: friendId });
         // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
@@ -350,21 +356,26 @@ app.post("/changeFriendStatus", async (req, res) => {
         if (add) {
             if (!user.friends.includes(friendId)) {
                 user.friends.push(friendId);
-                friend.friends.push(userId)
             }
-        }
-        await user.save();
-
-        // Send a success response
-        if (add) {
+            if (!friend.friends.includes(userId)) {
+                friend.friends.push(userId);
+            }
             res.status(200).json({
                 message: `FriendId ${friendId} added to user ${userId}`,
             });
         } else {
+            if (user.friends.includes(friendId)) {
+                user.friends.remove(friendId);
+            }
+            if (friend.friends.includes(userId)) {
+                friend.friends.remove(userId);
+            }
             res.status(200).json({
-                message: `FriendId ${friendId} removed from user ${userId}`,
+                message: `FriendId ${friendId} added to user ${userId}`,
             });
         }
+        await user.save();
+        await friend.save();
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Server error" });
@@ -435,17 +446,23 @@ app.post("/deleteReview", async (req, res) => {
 });
 app.post("/signup", async (req, res) => {
     const { email, username, password, user_type } = req.body;
+
+    console.log("SignUp:", req.body);
     // Check username e email
-    if (User.findOne({ username: username })) {
+    if ((await User.findOne({ username: username }))) {
         return res.status(404).json({ error: "username already in use" });
     }
-    if (User.findOne({ email: email })) {
+    if (await Login.findOne({ email: email })) {
         return res.status(404).json({ error: "email already in use" });
     }
+    console.log("Ok checks");
 
-    const userId = User.countDocuments() + 1;
+    const newUserId = await User.countDocuments() + 1;
+    const newPassword = await bcrypt.hash(password, saltRounds);
+    const newToken = jwt.sign({ id: username }, jwt_secret, {expiresIn: "168h"})
+
     const newUser = new User({
-        id: userId,
+        id: newUserId,
         username: username,
         member_since: new Date(),
         user_type: user_type,
@@ -453,32 +470,19 @@ app.post("/signup", async (req, res) => {
         wishlist: [],
         games: [],
     });
-    async function hashPassword(password) {
-        const saltRounds = 10;
-        try {
-            const hashedPassword = await bcrypt.hash(password, saltRounds);
-            return hashedPassword;
-        } catch (error) {
-            console.error("Error hashing password:", error);
-            throw error;
-        }
-    }
-    hashPassword(password).then((hashedPassword) => {
-        const newLogin = new Login({
-            email: email,
-            username: username,
-            password: hashPassword,
-            token: jwt.sign({ id: username }, jwt_secret, {
-                expiresIn: "168h", // una settimana per token
-            }),
-        });
-    });
-    Login.push(newLogin);
-    User.push(newUser);
-    await Login.save();
-    await User.save();
-    res.json(token);
-    console.log("sent token:", token);
+    const newLogin = new Login({
+        email: email,
+        username: username,
+        password: newPassword,
+        token: newToken
+    })
+
+    console.log("User Created:", newUser);
+    console.log("Login created", newLogin)
+    await newLogin.save();
+    await newUser.save();
+    res.json(newToken);
+    console.log("sent token:", newToken);
 });
 app.post("/login", async (req, res) => {
     const { email, password } = req.body;
