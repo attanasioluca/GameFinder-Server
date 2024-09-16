@@ -1,6 +1,7 @@
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth2").Strategy;
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = require("../secret");
+const { Login } = require("./models.js");
 
 passport.use(
     new GoogleStrategy(
@@ -8,19 +9,32 @@ passport.use(
             clientID: GOOGLE_CLIENT_ID,
             clientSecret: GOOGLE_CLIENT_SECRET,
             callbackURL: "http://localhost:3000/google/callback",
-            passReqToCallback: true,
         },
-        function (request, accessToken, refreshToken, profile, done) {
-            return done(null, profile);
+        async (accessToken, refreshToken, profile, done) => {
+            const email = profile.emails[0].value;
+
+            try {
+                // Find the user by email
+                let login = await Login.findOne({ email });
+
+                if (!login) {
+                    return done(null, false, { message: "No user found with this email." });
+                }
+
+                // If user is found, proceed with login
+                done(null, login);
+            } catch (error) {
+                done(error, null); // Handle errors
+            }
         }
     )
 );
 
-passport.serializeUser(function (user, done) {
+passport.serializeUser((user, done) => {
     done(null, user);
 });
 
-passport.deserializeUser(function (user, done) {
+passport.deserializeUser((user, done) => {
     done(null, user);
 });
 

@@ -9,6 +9,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { jwt_secret } = require("../secret");
 require("./auth");
+const { Login, Review, Game, Platform, Genre, User } = require("./models");
 // utilizzabile solo dal mio computer (Luca)
 
 app.use(
@@ -32,60 +33,6 @@ db.once("open", async () => {
     console.log("Connected to MongoDB");
 });
 
-// Define the Game schema and model
-const platformSchema = new mongoose.Schema({
-    id: { type: String, required: true },
-    name: { type: String, required: true },
-    slug: { type: String, required: true },
-});
-const reviewSchema = new mongoose.Schema({
-    author: { type: String, required: true },
-    authorName: { type: String, required: true },
-    gameId: { type: String, required: true },
-    comment: { type: String, required: true },
-    rating: { type: Number, required: true },
-});
-const gameSchema = new mongoose.Schema({
-    id: { type: String, required: true },
-    name: { type: String, required: true },
-    description: { type: String },
-    background_image: { type: String },
-    parent_platforms: [platformSchema],
-    metacritic: { type: Number },
-    rating_top: { type: Number },
-    released: { type: Date },
-    added: { type: Number },
-    genre: [{ type: String }],
-    reviews: [reviewSchema],
-});
-const genreSchema = new mongoose.Schema({
-    id: { type: String, required: true },
-    name: { type: String, required: true },
-    slug: { type: String, required: true },
-    background_image: { type: String },
-});
-const userSchema = new mongoose.Schema({
-    id: { type: String, required: true },
-    username: { type: String, required: true },
-    member_since: { type: Date, required: true },
-    user_type: { type: String, required: true },
-    friends: [{ type: String }],
-    wishlist: [{ type: String }],
-    games: [{ type: String }],
-});
-const loginSchema = new mongoose.Schema({
-    email: { type: String, required: true },
-    username: { type: String, required: true },
-    password: { type: String, required: true },
-    token: { type: String },
-});
-
-const Login = mongoose.model("Login", loginSchema);
-const Review = mongoose.model("Review", reviewSchema);
-const Game = mongoose.model("Game", gameSchema);
-const Platform = mongoose.model("Platform", platformSchema);
-const Genre = mongoose.model("Genre", genreSchema);
-const User = mongoose.model("User", userSchema);
 var LoggedUser = null;
 
 function isLogged(req, res, next) {
@@ -98,26 +45,63 @@ app.get("/", (req, res) => {
 app.get(
     "/auth/google",
     passport.authenticate("google", { scope: ["email", "profile"] }),
-    (req, res) => {
-        //res = token se autenticato
-    }
+    (req, res) => {}
 );
 app.get(
     "/google/callback",
     passport.authenticate("google", {
-        successRedirect: "/protected",
         failureRedirect: "/failure",
-    })
+    }),
+    async (req, res) => {
+        try {
+            // Access the authenticated user's email from req.user
+            const email = req.user.email;
+
+            // Find the corresponding Login object in your MongoDB
+            const user = await Login.findOne({ email });
+
+            if (user) {
+                // If the token is already present in the Login object
+                if (user.token) {
+                    // Use the existing token and redirect to your frontend
+                    res.redirect(
+                        `http://localhost:5173/googleLogin?token=${user.token}`
+                    );
+                } else {
+                    // If no token, generate a new token, store it in the Login object
+                    const token = jwt.sign(
+                        { id: user._id, email: user.email },
+                        jwt_secret,
+                        {
+                            expiresIn: "1h",
+                        }
+                    );
+
+                    // Save the token to the user
+                    user.token = token;
+                    await user.save();
+
+                    // Redirect with the newly generated token
+                    res.redirect(
+                        `http://localhost:5173/googleLogin?token=${token}`
+                    );
+                }
+            } else {
+                // If the user is not found, handle it
+                res.status(404).send("User not found.");
+            }
+        } catch (error) {
+            console.error("Error during Google callback:", error);
+            res.status(500).send("Internal server error.");
+        }
+    }
 );
+
 app.get("/failure", (req, res) => {
     res.send("errore...");
 });
 app.get("/protected", isLogged, (req, res) => {
-    //query su login con email
-    // crea token
-    // manda token a client
-
-    res.redirect(`/users/${req.user.email}`);
+    res.redirect(`http://localhost:5173/googleLogin/${isLogged.token}`);
 });
 app.get("/users/:usermail", isLogged, async (req, res) => {
     const { usermail } = req.params;
@@ -127,7 +111,7 @@ app.get("/users/:usermail", isLogged, async (req, res) => {
         const result = await Login.findOne({ email: usermail });
         if (result) {
             LoggedUser = result;
-            res.json(result);
+            res.redirect(`http://localhost:5173/googleLogin/${isLogged.token}`);
         } else {
             res.sendStatus(404);
             LoggedUser = null;
@@ -148,7 +132,6 @@ app.get("/gamesById", async (req, res) => {
         console.error("Error fetching games by ids:", error);
         res.status(500).send(error.message);
     }
-    
 });
 app.get("/games", async (req, res) => {
     const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
@@ -223,7 +206,8 @@ app.get("/userById/:userId", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/allUsers/:userId", async (req, res) => { // all but the one with iserId
+app.get("/allUsers/:userId", async (req, res) => {
+    // all but the one with iserId
     const { userId } = req.params;
     try {
         const result = await User.find({ id: { $ne: userId } });
@@ -235,7 +219,7 @@ app.get("/allUsers/:userId", async (req, res) => { // all but the one with iserI
     }
 });
 app.get("/userByToken/:token", async (req, res) => {
-    const { token }= req.params;
+    const { token } = req.params;
     try {
         const log = await Login.findOne({ token: token });
         if (!log) {
@@ -253,7 +237,7 @@ app.get("/userByToken/:token", async (req, res) => {
 });
 
 app.get("/userByUsername/:username", async (req, res) => {
-    const { username }= req.params;
+    const { username } = req.params;
     try {
         const user = await User.findOne({ username: username });
         if (!user) {
@@ -280,7 +264,14 @@ app.get("/gameStatus", async (req, res) => {
     }
     res.json(result);
 });
-
+app.get("/reviews/:gameId", async (req, res) => {
+    const { gameId } = req.params;
+    console.log(req.params);
+    const reviews = await Review.find({ gameId: gameId });
+    if (reviews) {
+        res.json(reviews);
+    }
+});
 // Post functions
 app.post("/changeGameStatus", async (req, res) => {
     const { userId, gameId, type, add } = req.body;
@@ -336,7 +327,7 @@ app.post("/changeFriendStatus", async (req, res) => {
     try {
         // Find the user by userId
         const user = await User.findOne({ id: userId });
-        const friend = await User.findOne({id: friendId});
+        const friend = await User.findOne({ id: friendId });
         // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
@@ -349,7 +340,7 @@ app.post("/changeFriendStatus", async (req, res) => {
         if (add) {
             if (!user.friends.includes(friendId)) {
                 user.friends.push(friendId);
-                friend.friends.push(userId)
+                friend.friends.push(userId);
             }
         }
         await user.save();
@@ -372,17 +363,6 @@ app.post("/changeFriendStatus", async (req, res) => {
 app.post("/addReview", async (req, res) => {
     const { author, authorName, gameId, comment, rating } = req.body;
     try {
-        // Find the game by gameId
-        const game = await Game.findOne({ id: gameId });
-        if (!game) {
-            return res.status(404).json({ error: "Game not found" });
-        }
-        // Find the user by userId
-        const user = await User.findOne({ id: author });
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
         // Create a new review/comment
         const newReview = new Review({
             author: author, // Reference to the user who posted the review
@@ -392,10 +372,7 @@ app.post("/addReview", async (req, res) => {
             rating: rating, // The rating value
         });
         console.log("sending review");
-        // Save the review in the reviews collection
-        game.reviews.push(newReview);
-        await game.save();
-        // Send a success response
+        await newReview.save()
         res.status(200).json({ message: "Review added successfully!" });
     } catch (err) {
         console.error("Error adding comment:", err);
@@ -404,45 +381,28 @@ app.post("/addReview", async (req, res) => {
 });
 app.post("/deleteReview", async (req, res) => {
     const { author, gameId } = req.body;
-    try {
-        // Find the game by gameId
-        const game = await Game.findOne({ id: gameId });
-        if (!game) {
-            return res.status(404).json({ error: "Game not found" });
-        }
-
-        // Find the index of the review by author
-        const reviewIndex = game.reviews.findIndex(
-            (review) => review.author === author
-        );
-        if (reviewIndex === -1) {
-            return res.status(404).json({ error: "Review not found" });
-        }
-
-        // Remove the review from the reviews array
-        game.reviews.splice(reviewIndex, 1);
-
-        // Save the game document after removing the review
-        await game.save();
-
-        // Send a success response
-        res.status(200).json({ message: "Review removed successfully!" });
-    } catch (err) {
-        console.error("Error removing review:", err);
-        res.status(500).json({ error: "Server error" });
-    }
+    Review.deleteOne({ author: author, gameId: gameId})
+    .then(result => {
+        console.log("Delete result:", result);
+    })
+    .catch(error => {
+        console.error("Error deleting document:", error);
+    });
 });
 app.post("/signup", async (req, res) => {
     const { email, username, password, user_type } = req.body;
-    // Check username e email
-    if (User.findOne({ username: username })) {
+    console.log(req.body);
+    const oldUser = await User.findOne({ username: username });
+    const oldLogin = await Login.findOne({ email: email });
+    if (oldUser) {
         return res.status(404).json({ error: "username already in use" });
     }
-    if (User.findOne({ email: email })) {
+    if (oldLogin) {
         return res.status(404).json({ error: "email already in use" });
     }
 
-    const userId = User.countDocuments() + 1;
+    const userId = (await User.countDocuments()) + 1;
+
     const newUser = new User({
         id: userId,
         username: username,
@@ -462,22 +422,21 @@ app.post("/signup", async (req, res) => {
             throw error;
         }
     }
+
     hashPassword(password).then((hashedPassword) => {
         const newLogin = new Login({
             email: email,
             username: username,
-            password: hashPassword,
+            password: hashedPassword,
             token: jwt.sign({ id: username }, jwt_secret, {
-                expiresIn: "168h", // una settimana per token
+                expiresIn: "168h",
             }),
         });
+        newLogin.save();
+        newUser.save();
+        res.json(newLogin.token);
+        console.log("sent token:", newLogin.token);
     });
-    Login.push(newLogin);
-    User.push(newUser);
-    await Login.save();
-    await User.save();
-    res.json(token);
-    console.log("sent token:", token);
 });
 app.post("/login", async (req, res) => {
     const { email, password } = req.body;
