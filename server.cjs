@@ -9,7 +9,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { jwt_secret } = require("../secret");
 require("./auth");
-const { Login, Review, Game, Platform, Genre, User } = require("./models");
+const { Login, Review, User } = require("./models");
 // utilizzabile solo dal mio computer (Luca)
 
 app.use(
@@ -24,7 +24,6 @@ app.use(passport.session());
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB
 mongoose.connect("mongodb://localhost:27017/GameFinder");
 
 const db = mongoose.connection;
@@ -121,81 +120,6 @@ app.get("/users/:usermail", isLogged, async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-app.get("/gamesById", async (req, res) => {
-    const { ids } = req.query;
-    console.log(ids);
-    const filter = { id: { $in: ids } };
-    try {
-        const games = await Game.find(filter);
-        res.json(games);
-    } catch (error) {
-        console.error("Error fetching games by ids:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/games", async (req, res) => {
-    const { pageNum = 1, platform, genre, sortOrder, searchText } = req.query;
-
-    const filter = {};
-    if (genre) {
-        filter["genre"] = genre;
-    }
-
-    if (platform) {
-        filter["parent_platforms.id"] = platform;
-    }
-    if (searchText) {
-        filter["name"] = { $regex: searchText, $options: "i" }; // Case insensitive search
-    }
-    const sort = {};
-    if (sortOrder) {
-        const [key, order] = sortOrder.split(":");
-        sort[key] =
-            sortOrder == "metacritic" || sortOrder == "rating_top" ? -1 : 1;
-    }
-
-    const pageSize = 16;
-    const skip = (pageNum - 1) * pageSize;
-
-    try {
-        const games = await Game.find(filter)
-            .sort(sort)
-            .skip(skip)
-            .limit(pageSize);
-        res.json(games);
-    } catch (error) {
-        console.error("Error fetching games:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/games/:gameId", async (req, res) => {
-    const { gameId } = req.params;
-    try {
-        const result = await Game.findOne({ id: gameId });
-        res.json(result);
-    } catch (error) {
-        console.error("Error fetching game from id:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/platforms", async (req, res) => {
-    try {
-        const result = await Platform.find();
-        res.json(result);
-    } catch (error) {
-        console.error("Error fetching platforms:", error);
-        res.status(500).send(error.message);
-    }
-});
-app.get("/genres", async (req, res) => {
-    try {
-        const result = await Genre.find();
-        res.json(result);
-    } catch (error) {
-        console.error("Error fetching genres:", error);
-        res.status(500).send(error.message);
-    }
-});
 app.get("/userById/:userId", async (req, res) => {
     const { userId } = req.params;
     try {
@@ -240,7 +164,6 @@ app.get("/userByToken/:token", async (req, res) => {
         res.status(500).send(error.message);
     }
 });
-
 app.get("/userByUsername/:username", async (req, res) => {
     const { username } = req.params;
     try {
@@ -282,9 +205,7 @@ app.post("/changeGameStatus", async (req, res) => {
     const { userId, gameId, type, add } = req.body;
     console.log(req.body);
     try {
-        // Find the user by userId
         const user = await User.findOne({ id: userId });
-        // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
             return res.status(404).json({ error: "User not found" });
@@ -293,31 +214,29 @@ app.post("/changeGameStatus", async (req, res) => {
             console.log("No game id");
             return res.status(404).json({ error: "Game id doesn't exist" });
         }
-        // Depending on the "type", add the gameId to either "games" or "wishlist"
         if (add) {
             if (type === 1) {
                 if (!user.games.includes(gameId)) {
-                    user.games.push(gameId); // Add gameId to the games array
+                    user.games.push(gameId); 
                 }
             } else if (type === 2) {
                 if (!user.wishlist.includes(gameId)) {
-                    user.wishlist.push(gameId); // Add gameId to the wishlist array
+                    user.wishlist.push(gameId); 
                 }
             }
         } else {
             if (type === 1) {
                 if (user.games.includes(gameId)) {
-                    user.games.remove(gameId); // Add gameId to the games array
+                    user.games.remove(gameId); 
                 }
             } else if (type === 2) {
                 if (user.wishlist.includes(gameId)) {
-                    user.wishlist.remove(gameId); // Add gameId to the wishlist array
+                    user.wishlist.remove(gameId); 
                 }
             }
         }
         await user.save();
 
-        // Send a success response
         res.status(200).json({
             message: `gameId ${gameId} added to ${type} for user ${userId}`,
         });
@@ -329,10 +248,9 @@ app.post("/changeGameStatus", async (req, res) => {
 app.post("/changeFriendStatus", async (req, res) => {
     const { userId, friendId, add } = req.body;
     try {
-        // Find the user by userId
+
         const user = await User.findOne({ id: userId });
         const friend = await User.findOne({ id: friendId });
-        // If user doesn't exist, return an error
         if (!user) {
             console.log("User not found");
             return res.status(404).json({ error: "User not found" });
@@ -370,13 +288,12 @@ app.post("/changeFriendStatus", async (req, res) => {
 app.post("/addReview", async (req, res) => {
     const { author, authorName, gameId, comment, rating } = req.body;
     try {
-        // Create a new review/comment
         const newReview = new Review({
-            author: author, // Reference to the user who posted the review
+            author: author, 
             authorName: authorName,
-            gameId: gameId, // Reference to the game being reviewed
-            comment: comment, // The comment text
-            rating: rating, // The rating value
+            gameId: gameId, 
+            comment: comment, 
+            rating: rating, 
         });
         console.log("sending review");
         await newReview.save();
@@ -458,7 +375,6 @@ app.post("/login", async (req, res) => {
         if (!isMatch) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
-        // Genera un token JWT
         console.log(jwt_secret);
         const token = jwt.sign({ id: email }, jwt_secret, {
             expiresIn: "900h",
