@@ -104,7 +104,6 @@ app.get("/protected", isLogged, (req, res) => {
 });
 app.get("/users/:usermail", isLogged, async (req, res) => {
     const { usermail } = req.params;
-    console.log(usermail);
 
     try {
         const result = await Login.findOne({ email: usermail });
@@ -140,7 +139,6 @@ app.get("/allUsers/:userId", async (req, res) => {
                 id: { $nin: user.friends },
             });
             res.json(result);
-            console.log(result);
         }
     } catch (error) {
         console.error("Error fetching users from id:", error);
@@ -185,7 +183,7 @@ app.get("/gameStatus", async (req, res) => {
         if (user) {
             result.inCollection = user.games.includes(gameId);
             result.inWishlist = user.wishlist.includes(gameId);
-        } else console.log(req);
+        }
     } catch (error) {
         console.error("Error fetching user from id:", error);
         res.status(500).send(error.message);
@@ -194,7 +192,6 @@ app.get("/gameStatus", async (req, res) => {
 });
 app.get("/reviews/:gameId", async (req, res) => {
     const { gameId } = req.params;
-    console.log(req.params);
     const reviews = await Review.find({ gameId: gameId });
     if (reviews) {
         res.json(reviews);
@@ -203,15 +200,12 @@ app.get("/reviews/:gameId", async (req, res) => {
 // Post functions
 app.post("/changeGameStatus", async (req, res) => {
     const { userId, gameId, type, add } = req.body;
-    console.log(req.body);
     try {
         const user = await User.findOne({ id: userId });
         if (!user) {
-            console.log("User not found");
             return res.status(404).json({ error: "User not found" });
         }
         if (!gameId) {
-            console.log("No game id");
             return res.status(404).json({ error: "Game id doesn't exist" });
         }
         if (add) {
@@ -252,11 +246,9 @@ app.post("/changeFriendStatus", async (req, res) => {
         const user = await User.findOne({ id: userId });
         const friend = await User.findOne({ id: friendId });
         if (!user) {
-            console.log("User not found");
             return res.status(404).json({ error: "User not found" });
         }
         if (!friend) {
-            console.log("No friend id");
             return res.status(404).json({ error: "Game id doesn't exist" });
         }
         if (add) {
@@ -295,7 +287,6 @@ app.post("/addReview", async (req, res) => {
             comment: comment, 
             rating: rating, 
         });
-        console.log("sending review");
         await newReview.save();
         res.status(200).json({ message: "Review added successfully!" });
     } catch (err) {
@@ -305,17 +296,16 @@ app.post("/addReview", async (req, res) => {
 });
 app.post("/deleteReview", async (req, res) => {
     const { author, gameId } = req.body;
-    Review.deleteOne({ author: author, gameId: gameId })
-        .then((result) => {
-            console.log("Delete result:", result);
-        })
-        .catch((error) => {
-            console.error("Error deleting document:", error);
-        });
+    try{
+        await Review.deleteOne({ author: author, gameId: gameId })
+        res.status(200).json({ message: "Review added successfully!" });
+    } catch (err) {
+        console.error("Error adding comment:", err);
+        res.status(500).json({ error: "Server error" });
+    }
 });
 app.post("/signup", async (req, res) => {
     const { email, username, password, user_type } = req.body;
-    console.log(req.body);
     const oldUser = await User.findOne({ username: username });
     const oldLogin = await Login.findOne({ email: email });
     if (oldUser) {
@@ -359,12 +349,10 @@ app.post("/signup", async (req, res) => {
         newLogin.save();
         newUser.save();
         res.json(newLogin.token);
-        console.log("sent token:", newLogin.token);
     });
 });
 app.post("/login", async (req, res) => {
     const { email, password } = req.body;
-    console.log(req.body);
     try {
         const login = await Login.findOne({ email: email });
         if (!login) {
@@ -375,7 +363,6 @@ app.post("/login", async (req, res) => {
         if (!isMatch) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
-        console.log(jwt_secret);
         const token = jwt.sign({ id: email }, jwt_secret, {
             expiresIn: "900h",
         });
