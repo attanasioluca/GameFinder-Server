@@ -207,12 +207,17 @@ app.get("/userById/:userId", async (req, res) => {
     }
 });
 app.get("/allUsers/:userId", async (req, res) => {
-    // all but the one with iserId
     const { userId } = req.params;
     try {
-        const result = await User.find({ id: { $ne: userId } });
-        res.json(result);
-        console.log(result);
+        const user = await User.findOne({ id: userId });
+        if (user) {
+            const result = await User.find({
+                id: { $ne: userId },
+                id: { $nin: user.friends },
+            });
+            res.json(result);
+            console.log(result);
+        }
     } catch (error) {
         console.error("Error fetching users from id:", error);
         res.status(500).send(error.message);
@@ -323,7 +328,6 @@ app.post("/changeGameStatus", async (req, res) => {
 });
 app.post("/changeFriendStatus", async (req, res) => {
     const { userId, friendId, add } = req.body;
-    console.log(req.body);
     try {
         // Find the user by userId
         const user = await User.findOne({ id: userId });
@@ -342,10 +346,13 @@ app.post("/changeFriendStatus", async (req, res) => {
                 user.friends.push(friendId);
                 friend.friends.push(userId);
             }
+        } else {
+            if (user.friends.includes(friendId)) {
+                user.friends.remove(friendId);
+                friend.friends.remove(userId);
+            }
         }
         await user.save();
-
-        // Send a success response
         if (add) {
             res.status(200).json({
                 message: `FriendId ${friendId} added to user ${userId}`,
@@ -372,7 +379,7 @@ app.post("/addReview", async (req, res) => {
             rating: rating, // The rating value
         });
         console.log("sending review");
-        await newReview.save()
+        await newReview.save();
         res.status(200).json({ message: "Review added successfully!" });
     } catch (err) {
         console.error("Error adding comment:", err);
@@ -381,13 +388,13 @@ app.post("/addReview", async (req, res) => {
 });
 app.post("/deleteReview", async (req, res) => {
     const { author, gameId } = req.body;
-    Review.deleteOne({ author: author, gameId: gameId})
-    .then(result => {
-        console.log("Delete result:", result);
-    })
-    .catch(error => {
-        console.error("Error deleting document:", error);
-    });
+    Review.deleteOne({ author: author, gameId: gameId })
+        .then((result) => {
+            console.log("Delete result:", result);
+        })
+        .catch((error) => {
+            console.error("Error deleting document:", error);
+        });
 });
 app.post("/signup", async (req, res) => {
     const { email, username, password, user_type } = req.body;
